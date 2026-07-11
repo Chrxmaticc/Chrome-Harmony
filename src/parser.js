@@ -37,10 +37,6 @@ function getSection(content, name) {
   return match ? match[1].trim() : '';
 }
 
-// ============================================================
-// HEADER
-// ============================================================
-
 function parseHeaderBlock(text) {
   const header = { tempo: 140, audio_note: 'none' };
   if (!text) return header;
@@ -57,10 +53,6 @@ function parseHeaderBlock(text) {
   return header;
 }
 
-// ============================================================
-// PATTERNS
-// ============================================================
-
 function parsePatternsBlock(text) {
   const patterns = {};
   if (!text) return patterns;
@@ -76,10 +68,6 @@ function parsePatternsBlock(text) {
 
   return patterns;
 }
-
-// ============================================================
-// IMPORTS
-// ============================================================
 
 function parseImportsBlock(text) {
   const imports = [];
@@ -112,16 +100,13 @@ function parseImportLine(line) {
   return importData;
 }
 
-// ============================================================
-// SCORE TRACKS
-// ============================================================
-
 function parseScoreTracks(text, patterns) {
   const tracks = {};
   if (!text) return tracks;
 
-  // Expand pattern references first
   let expanded = text;
+
+  // Expand pattern references
   const patternRefRegex = /pattern:(\w+)/gi;
   let refMatch;
   while ((refMatch = patternRefRegex.exec(text)) !== null) {
@@ -147,7 +132,7 @@ function parseScoreTracks(text, patterns) {
     };
   }
 
-  // If no track blocks found, treat entire score as single "main" track
+  // If no track blocks, treat as single "main" track
   if (Object.keys(tracks).length === 0 && expanded.trim()) {
     tracks.main = {
       events: parseTrackLines(expanded),
@@ -178,9 +163,9 @@ function parseTrackLines(text) {
       continue;
     }
 
-    // Pattern reference inline
+    // Pattern reference
     if (trimmed.startsWith('pattern:')) {
-      continue; // Already expanded above
+      continue;
     }
 
     // Grid time: line:N
@@ -227,7 +212,7 @@ function parseTrackLines(text) {
         time: null,
         sounds: stacked,
       });
-      currentBeat += 1; // default quarter per stack
+      currentBeat += 1;
     }
   }
 
@@ -247,12 +232,11 @@ function parseSoundTokens(content) {
       effects: parseEffects(match[3]),
     };
 
-    // Extract glide if present in bracket syntax: [Bass808:C2 glide:Eb2 quarter volume:0.8]
+    // Extract glide if present
     if (match[3] && match[3].includes('glide:')) {
       const glideMatch = match[3].match(/glide:(\S+)/);
       if (glideMatch) {
         sound.glideFrom = glideMatch[1];
-        // Remove glide from effects so it doesn't get treated as an effect
         if (sound.effects) {
           delete sound.effects.glide;
         }
@@ -263,12 +247,6 @@ function parseSoundTokens(content) {
   }
 
   // (Instrument Note) and (Instrument Note glide:Note)
-  sounds.push(...parseStackedSounds(content));
-
-  return sounds;
-}
-
-  // (Instrument Note)
   sounds.push(...parseStackedSounds(content));
 
   return sounds;
@@ -309,10 +287,6 @@ function parseEffects(str) {
 
   return effects;
 }
-
-// ============================================================
-// VOCAL SPANS
-// ============================================================
 
 function parseVocalSpans(text) {
   const spans = [];
