@@ -76,7 +76,7 @@ class ChromeHarmonyEngine {
     const raw = instruments.generate(sound.instrument, freq, dur, this.sampleRate, glideFrom);
 
     let processed;
-    if (['pad', 'paddark'].includes(sound.instrument?.toLowerCase())) {
+    if (['pad', 'paddark', 'padwarm', 'padairy'].includes(sound.instrument?.toLowerCase())) {
       processed = envelopes.adsr(raw, 0.05, 0.1, 0.7, 0.2, this.sampleRate);
     } else {
       processed = envelopes.apply(raw, 0.003, 0.04, this.sampleRate);
