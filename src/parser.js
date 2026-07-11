@@ -241,12 +241,32 @@ function parseSoundTokens(content) {
   const bracketRegex = /\[(\w+):(\S+)\s*([^\]]*)\]/g;
   let match;
   while ((match = bracketRegex.exec(content)) !== null) {
-    sounds.push({
+    const sound = {
       instrument: match[1],
       note: match[2],
       effects: parseEffects(match[3]),
-    });
+    };
+
+    // Extract glide if present in bracket syntax: [Bass808:C2 glide:Eb2 quarter volume:0.8]
+    if (match[3] && match[3].includes('glide:')) {
+      const glideMatch = match[3].match(/glide:(\S+)/);
+      if (glideMatch) {
+        sound.glideFrom = glideMatch[1];
+        // Remove glide from effects so it doesn't get treated as an effect
+        if (sound.effects) {
+          delete sound.effects.glide;
+        }
+      }
+    }
+
+    sounds.push(sound);
   }
+
+  // (Instrument Note) and (Instrument Note glide:Note)
+  sounds.push(...parseStackedSounds(content));
+
+  return sounds;
+}
 
   // (Instrument Note)
   sounds.push(...parseStackedSounds(content));
