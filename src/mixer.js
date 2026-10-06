@@ -1,4 +1,6 @@
-// Mixes sample buffers together
+// src/mixer.js
+// Mixes sample buffers. normalize() clamps peak to 0.95 — only runs when
+// the header does NOT say "normalize: off".
 
 function mixInto(masterBuffer, samples, startSample) {
   for (let i = 0; i < samples.length; i++) {
@@ -15,14 +17,14 @@ function normalize(buffer) {
     const abs = Math.abs(buffer[i]);
     if (abs > maxAmp) maxAmp = abs;
   }
-  
+
   if (maxAmp > 0.95) {
     const scale = 0.95 / maxAmp;
     for (let i = 0; i < buffer.length; i++) {
       buffer[i] *= scale;
     }
   }
-  
+
   return buffer;
 }
 
@@ -31,14 +33,14 @@ function mixMultiple(buffers) {
   for (const buf of buffers) {
     if (buf.length > maxLength) maxLength = buf.length;
   }
-  
+
   const output = new Float32Array(maxLength);
   for (const buf of buffers) {
     for (let i = 0; i < buf.length; i++) {
       output[i] += buf[i];
     }
   }
-  
+
   return normalize(output);
 }
 
