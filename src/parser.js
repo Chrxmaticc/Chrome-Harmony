@@ -1,33 +1,30 @@
 // src/parser.js
-// Chrome Harmony Parser
-// Handles HEADER, PATTERNS, TRACKS, IMPORTS, VOCAL_SPAN, SCORE
-// Supports: patterns, tracks, sidechain, glide, microtones, grid time
+// Chrome Harmony Parser — pure, no fs.
+// Handles HEADER, PATTERNS, IMPORTS, TRACK_FX, MASTER_EFFECTS, SCORE, VOCAL_SPAN.
+// Supports: patterns, tracks, sidechain, glide, microtones, grid time.
 
-const fs = require('fs');
 const { durationToBeats } = require('./notes');
 
-function parseChFile(filePath) {
-  const content = fs.readFileSync(filePath, 'utf-8');
-  return parseChString(content);
-}
-
 function parseChString(content) {
-  // Strip comments
   const clean = content.replace(/\/\/.*$/gm, '');
 
-  const header = getSection(clean, 'HEADER');
-  const patterns = getSection(clean, 'PATTERNS');
-  const imports = getSection(clean, 'IMPORTS');
-  const score = getSection(clean, 'SCORE');
+  const header      = getSection(clean, 'HEADER');
+  const patterns    = getSection(clean, 'PATTERNS');
+  const imports     = getSection(clean, 'IMPORTS');
+  const trackFx     = getSection(clean, 'TRACK_FX');
+  const masterFx    = getSection(clean, 'MASTER_EFFECTS');
+  const score       = getSection(clean, 'SCORE');
 
   const parsedPatterns = parsePatternsBlock(patterns);
 
   return {
-    header: parseHeaderBlock(header),
-    patterns: parsedPatterns,
-    imports: parseImportsBlock(imports),
-    tracks: parseScoreTracks(score, parsedPatterns),
-    vocalSpans: parseVocalSpans(score),
+    header:      parseHeaderBlock(header),
+    patterns:    parsedPatterns,
+    imports:     parseImportsBlock(imports),
+    trackFx:     parseTrackFxBlock(trackFx),
+    masterFx:    parseEffects(masterFx.replace(/\n/g, ' ')),
+    tracks:      parseScoreTracks(score, parsedPatterns),
+    vocalSpans:  parseVocalSpans(score),
   };
 }
 
@@ -46,7 +43,7 @@ function parseHeaderBlock(text) {
     if (idx === -1) return;
     const key = line.substring(0, idx).trim();
     let value = line.substring(idx + 1).trim();
-    if (!isNaN(value)) value = Number(value);
+    if (!isNaN(value) && value !== '') value = Number(value);
     header[key] = value;
   });
 
@@ -85,7 +82,7 @@ function parseImportsBlock(text) {
 
 function parseImportLine(line) {
   const importData = {};
-  const parts = line.substring(7).split(/\s+/);
+  const parts = line.substring(7).trim().split(/\s+/);
   for (const part of parts) {
     const colonIdx = part.indexOf(':');
     if (colonIdx === -1) {
@@ -94,10 +91,27 @@ function parseImportLine(line) {
     }
     const key = part.substring(0, colonIdx).trim();
     let value = part.substring(colonIdx + 1).trim();
-    if (!isNaN(value)) value = Number(value);
+    if (!isNaN(value) && value !== '') value = Number(value);
     importData[key] = value;
   }
+
+  // Derive name from filename if not explicitly given.
+  if (!importData.name && importData.file) {
+    importData.name = importData.file.split(/[\\/]/).pop().replace(/\.[^.]+$/, '');
+  }
   return importData;
+}
+
+function parseTrackFxBlock(text) {
+  const map = {};
+  if (!text) return map;
+
+  const re = /\[FX:\s*(\w+)\]([\s\S]*?)\[\/FX\]/gi;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    map[m[1]] = parseEffects(m[2].replace(/\n/g, ' '));
+  }
+  return map;
 }
 
 function parseScoreTracks(text, patterns) {
@@ -106,18 +120,17 @@ function parseScoreTracks(text, patterns) {
 
   let expanded = text;
 
-  // Expand pattern references
+  // Expand pattern references. FIXED: was .replace() which only swaps the first hit.
   const patternRefRegex = /pattern:(\w+)/gi;
   let refMatch;
   while ((refMatch = patternRefRegex.exec(text)) !== null) {
     const patternName = refMatch[1];
     if (patterns[patternName]) {
       const patternLines = patterns[patternName].map(e => e.content).join('\n');
-      expanded = expanded.replace(refMatch[0], patternLines);
+      expanded = expanded.split(refMatch[0]).join(patternLines);
     }
   }
 
-  // Parse [TRACK: name sidechain:kick] blocks
   const trackRegex = /\[TRACK:\s*(\w+)(?:\s+sidechain:(kick))?\s*\]([\s\S]*?)\[\/TRACK\]/gi;
   let trackMatch;
 
@@ -125,14 +138,13 @@ function parseScoreTracks(text, patterns) {
     const trackName = trackMatch[1];
     const hasSidechain = trackMatch[2] === 'kick';
     const trackBody = trackMatch[3];
-    
+
     tracks[trackName] = {
       events: parseTrackLines(trackBody),
       sidechain: hasSidechain,
     };
   }
 
-  // If no track blocks, treat as single "main" track
   if (Object.keys(tracks).length === 0 && expanded.trim()) {
     tracks.main = {
       events: parseTrackLines(expanded),
@@ -154,32 +166,22 @@ function parseTrackLines(text) {
     if (trimmed.startsWith('//')) continue;
     if (trimmed.startsWith('[VOCAL_SPAN]')) continue;
 
-    // Silence command
     if (trimmed.startsWith('silence')) {
       const durMatch = trimmed.match(/silence\s+(\w+)/);
-      if (durMatch) {
-        currentBeat += durationToBeats(durMatch[1]);
-      }
+      if (durMatch) currentBeat += durationToBeats(durMatch[1]);
       continue;
     }
 
-    // Pattern reference
-    if (trimmed.startsWith('pattern:')) {
-      continue;
-    }
+    if (trimmed.startsWith('pattern:')) continue;
 
-    // Grid time: line:N
     const lineMatch = trimmed.match(/^line:(\d+)\s+(.+)/i);
     if (lineMatch) {
       const time = parseInt(lineMatch[1]) * 0.01;
       const sounds = parseSoundTokens(lineMatch[2]);
-      if (sounds.length > 0) {
-        events.push({ beat: null, time, sounds });
-      }
+      if (sounds.length > 0) events.push({ beat: null, time, sounds });
       continue;
     }
 
-    // Musical time: Instrument:Note Duration effects...
     const soundMatch = trimmed.match(/^(\w+):(\S+)\s+(\w+)(.*)/);
     if (soundMatch) {
       const instrument = soundMatch[1];
@@ -204,14 +206,9 @@ function parseTrackLines(text) {
       continue;
     }
 
-    // Stacked sounds: (Instrument Note)
     const stacked = parseStackedSounds(trimmed);
     if (stacked.length > 0) {
-      events.push({
-        beat: currentBeat,
-        time: null,
-        sounds: stacked,
-      });
+      events.push({ beat: currentBeat, time: null, sounds: stacked });
       currentBeat += 1;
     }
   }
@@ -222,7 +219,6 @@ function parseTrackLines(text) {
 function parseSoundTokens(content) {
   const sounds = [];
 
-  // [Instrument:Note effects...]
   const bracketRegex = /\[(\w+):(\S+)\s*([^\]]*)\]/g;
   let match;
   while ((match = bracketRegex.exec(content)) !== null) {
@@ -231,24 +227,17 @@ function parseSoundTokens(content) {
       note: match[2],
       effects: parseEffects(match[3]),
     };
-
-    // Extract glide if present
     if (match[3] && match[3].includes('glide:')) {
       const glideMatch = match[3].match(/glide:(\S+)/);
       if (glideMatch) {
         sound.glideFrom = glideMatch[1];
-        if (sound.effects) {
-          delete sound.effects.glide;
-        }
+        if (sound.effects) delete sound.effects.glide;
       }
     }
-
     sounds.push(sound);
   }
 
-  // (Instrument Note) and (Instrument Note glide:Note)
   sounds.push(...parseStackedSounds(content));
-
   return sounds;
 }
 
@@ -258,13 +247,8 @@ function parseStackedSounds(content) {
   let match;
 
   while ((match = parenRegex.exec(content)) !== null) {
-    const sound = {
-      instrument: match[1],
-      note: match[2],
-    };
-    if (match[3]) {
-      sound.glideFrom = match[3];
-    }
+    const sound = { instrument: match[1], note: match[2] };
+    if (match[3]) sound.glideFrom = match[3];
     sounds.push(sound);
   }
 
@@ -281,7 +265,7 @@ function parseEffects(str) {
     if (colonIdx === -1) continue;
     const key = part.substring(0, colonIdx).trim();
     let value = part.substring(colonIdx + 1).trim();
-    if (!isNaN(value)) value = parseFloat(value);
+    if (!isNaN(value) && value !== '') value = parseFloat(value);
     effects[key] = value;
   }
 
@@ -304,7 +288,7 @@ function parseVocalSpans(text) {
       if (idx === -1) return;
       const key = line.substring(0, idx).trim();
       let value = line.substring(idx + 1).trim();
-      if (!isNaN(value)) value = Number(value);
+      if (!isNaN(value) && value !== '') value = Number(value);
       span[key] = value;
     });
 
@@ -314,4 +298,4 @@ function parseVocalSpans(text) {
   return spans;
 }
 
-module.exports = { parseChFile, parseChString };
+module.exports = { parseChString };
